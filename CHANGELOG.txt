@@ -1,3 +1,8 @@
+Version 0.5
+-------------
+
+    - Fixed issue #5. This is the last version of this project.
+
 Version 0.4
 -------------
 
