@@ -2,10 +2,11 @@
 PyIntervalTree
 ==============
 
-    NB: This is a straight fork of `PyIntervalTree by Chaim-Leib Halbert <https://github.com/MusashiAharon/PyIntervalTree>`_.
-    This fork adds some tests, fixes some bugs, registers the package at PyPI as `PyIntervalTree <https://pypi.python.org/PyIntervalTree>`_,
-    adds a ``intervaltree.bio`` package with some utilities for bioinformatics needs (see below).
-    Some further maintenance or updates might still be possible, and eventually the fork could merge into the original (depending on the original author's opinion).
+    NB: This package **is deprecated**. Please, use the ``intervaltree`` package instead (available via `Github <https://github.com/chaimleib/intervaltree>`__ or `PyPI <https://pypi.python.org/pypi/intervaltree>`__).
+    
+    The genome-related functionality is extracted to the ``intervaltree-bio`` package (`Github <https://github.com/konstantint/intervaltree-bio>`__, `PyPI <https://pypi.python.org/pypi/intervaltree-bio>`__).
+        
+    **No future versions of this package are planned. Do not file issues.**
 
 A mutable, self-balancing interval tree. Queries may be by point, by range 
 overlap, or by range envelopment.

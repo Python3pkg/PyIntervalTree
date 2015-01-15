@@ -8,16 +8,19 @@ Copyright 2014, Chaim-Leib Halbert, Konstantin Tretyakov.
 Licensed under LGPL.
 '''
 
-from .interval import *
+from .interval import Interval
+from .node import Node
 from numbers import Number
-from operator import attrgetter
+import collections
+from sortedcontainers import SortedDict
+from warnings import warn
 
 try:
     xrange  # Python 2?
 except NameError:
     xrange = range
 
-class IntervalTree(object):
+class IntervalTree(collections.MutableSet):
     """
     A binary lookup tree of intervals.
     The intervals contained in the tree are represented using ``Interval(a, b, data)`` objects.
@@ -28,190 +31,225 @@ class IntervalTree(object):
     
     Initialize a blank tree::
     
-        >>> itree = IntervalTree()
-        >>> len(itree)
-        0
+        >>> tree = IntervalTree()
+        >>> tree
+        IntervalTree()
     
     Initialize a tree from an iterable set of Intervals in O(n * log n)::
     
-        >>> itree = IntervalTree([Interval(-10, 10), Interval(-10.0, 10.0)])
-        >>> len(itree)
-        1
+        >>> tree = IntervalTree([Interval(-10, 10), Interval(-20.0, -10.0)])
+        >>> tree
+        IntervalTree([Interval(-20.0, -10.0), Interval(-10, 10)])
+        >>> len(tree)
+        2
     
-    Note that this is a set, i.e. repeated intervals are ignored. However, intervals with different data fields are regarded as different::
+    Note that this is a set, i.e. repeated intervals are ignored. However,
+    Intervals with different data fields are regarded as different::
     
-        >>> itree = IntervalTree([Interval(-10, 10), Interval(-10, 10), Interval(-10, 10, "x")])
-        >>> len(itree)
+        >>> tree = IntervalTree([Interval(-10, 10), Interval(-10, 10), Interval(-10, 10, "x")])
+        >>> tree
+        IntervalTree([Interval(-10, 10), Interval(-10, 10, 'x')])
+        >>> len(tree)
         2
     
     Insertions::
-    
-        >>> itree[-10:20] = "arbitrary data"
-        >>> itree[-10:20] = None  # Note that this is also an insertion
-        >>> len(itree)
-        4
-        >>> itree[-10:20] = None  # This won't change anything
-        >>> itree[-10:20] = "arbitrary data" # Neither will this
-        >>> len(itree)
-        4
-        >>> itree.add(Interval(10, 20))
-        >>> itree.addi(19.9, 20)
-        >>> len(itree)
-        6
-        >>> itree.extend([Interval(19.9, 20.1), Interval(20.1, 30)])
-        >>> len(itree)
-        8
-        >>> itree.extend([Interval(19.9, 20.1), Interval(20.1, 30)]) # Note the set-like logic again
-        >>> len(itree)
-        8
+        >>> tree = IntervalTree()
+        >>> tree[0:1] = "data"
+        >>> tree.add(Interval(10, 20))
+        >>> tree.addi(19.9, 20)
+        >>> tree
+        IntervalTree([Interval(0, 1, 'data'), Interval(10, 20), Interval(19.9, 20)])
+        >>> tree.update([Interval(19.9, 20.1), Interval(20.1, 30)])
+        >>> len(tree)
+        5
+
+        Inserting the same Interval twice does nothing::
+            >>> tree = IntervalTree()
+            >>> tree[-10:20] = "arbitrary data"
+            >>> tree[-10:20] = None  # Note that this is also an insertion
+            >>> tree
+            IntervalTree([Interval(-10, 20), Interval(-10, 20, 'arbitrary data')])
+            >>> tree[-10:20] = None  # This won't change anything
+            >>> tree[-10:20] = "arbitrary data" # Neither will this
+            >>> len(tree)
+            2
 
     Deletions::
-    
-        >>> itree.remove(Interval(-10, 10))
-        >>> len(itree)
-        7
-        >>> itree.remove(Interval(-10, 10))
+        >>> tree = IntervalTree(Interval(b, e) for b, e in [(-10, 10), (-20, -10), (10, 20)])
+        >>> tree
+        IntervalTree([Interval(-20, -10), Interval(-10, 10), Interval(10, 20)])
+        >>> tree.remove(Interval(-10, 10))
+        >>> tree
+        IntervalTree([Interval(-20, -10), Interval(10, 20)])
+        >>> tree.remove(Interval(-10, 10))
         Traceback (most recent call last):
         ...
         ValueError
-        >>> itree.discard(Interval(-10, 10)) # Same as remove, but no exception on failure
-        >>> len(itree)
-        7
+        >>> tree.discard(Interval(-10, 10))  # Same as remove, but no exception on failure
+        >>> tree
+        IntervalTree([Interval(-20, -10), Interval(10, 20)])
         
     Delete intervals, overlapping a given point::
     
-        >>> itree = IntervalTree([Interval(-1.1, 1.1), Interval(-0.5, 1.5), Interval(0.5, 1.7)])
-        >>> itree.remove_overlap(1.1)
-        >>> list(itree)
-        [Interval(-1.1, 1.1, None)]
+        >>> tree = IntervalTree([Interval(-1.1, 1.1), Interval(-0.5, 1.5), Interval(0.5, 1.7)])
+        >>> tree.remove_overlap(1.1)
+        >>> tree
+        IntervalTree([Interval(-1.1, 1.1)])
         
     Delete intervals, overlapping an interval::
     
-        >>> itree = IntervalTree([Interval(-1.1, 1.1), Interval(-0.5, 1.5), Interval(0.5, 1.7)])
-        >>> itree.remove_overlap(0, 0.5)
-        >>> list(itree)
-        [Interval(0.5, 1.7, None)]
-        >>> itree.remove_overlap(1.7, 1.8)
-        >>> list(itree)
-        [Interval(0.5, 1.7, None)]
-        >>> itree.remove_overlap(1.6, 1.6) # Empty interval still works
-        >>> list(itree)
-        []
+        >>> tree = IntervalTree([Interval(-1.1, 1.1), Interval(-0.5, 1.5), Interval(0.5, 1.7)])
+        >>> tree.remove_overlap(0, 0.5)
+        >>> tree
+        IntervalTree([Interval(0.5, 1.7)])
+        >>> tree.remove_overlap(1.7, 1.8)
+        >>> tree
+        IntervalTree([Interval(0.5, 1.7)])
+        >>> tree.remove_overlap(1.6, 1.6)  # Null interval does nothing
+        >>> tree
+        IntervalTree([Interval(0.5, 1.7)])
+        >>> tree.remove_overlap(1.6, 1.5)  # Ditto
+        >>> tree
+        IntervalTree([Interval(0.5, 1.7)])
         
     Delete intervals, enveloped in the range::
     
-        >>> itree = IntervalTree([Interval(-1.1, 1.1), Interval(-0.5, 1.5), Interval(0.5, 1.7)])
-        >>> itree.remove_envelop(-1.0, 1.5)
-        >>> sorted(itree)
-        [Interval(-1.1, 1.1, None), Interval(0.5, 1.7, None)]
-        >>> itree.remove_envelop(-1.1, 1.5)
-        >>> list(itree)
-        [Interval(0.5, 1.7, None)]
-        >>> itree.remove_envelop(0.5, 1.5)
-        >>> list(itree)
-        [Interval(0.5, 1.7, None)]
-        >>> itree.remove_envelop(0.5, 1.7)
-        >>> list(itree)
-        []
+        >>> tree = IntervalTree([Interval(-1.1, 1.1), Interval(-0.5, 1.5), Interval(0.5, 1.7)])
+        >>> tree.remove_envelop(-1.0, 1.5)
+        >>> tree
+        IntervalTree([Interval(-1.1, 1.1), Interval(0.5, 1.7)])
+        >>> tree.remove_envelop(-1.1, 1.5)
+        >>> tree
+        IntervalTree([Interval(0.5, 1.7)])
+        >>> tree.remove_envelop(0.5, 1.5)
+        >>> tree
+        IntervalTree([Interval(0.5, 1.7)])
+        >>> tree.remove_envelop(0.5, 1.7)
+        >>> tree
+        IntervalTree()
         
     Point/interval overlap queries::
     
-        >>> itree = IntervalTree([Interval(-1.1, 1.1), Interval(-0.5, 1.5), Interval(0.5, 1.7)])
-        >>> assert itree[-1.1]         == set([Interval(-1.1, 1.1, None)])
-        >>> assert itree.search(1.1)   == set([Interval(-0.5, 1.5, None), Interval(0.5, 1.7, None)])   # Same as [1.1]
-        >>> assert itree[-0.5:0.5]     == set([Interval(-0.5, 1.5, None), Interval(-1.1, 1.1, None)])  # Interval overlap query
-        >>> assert itree.search(1.5, 1.5) == set([Interval(0.5, 1.7, None)])                           # Same as [1.5, 1.5]
-        >>> assert itree.search(1.7, 1.7) == set([])
+        >>> tree = IntervalTree([Interval(-1.1, 1.1), Interval(-0.5, 1.5), Interval(0.5, 1.7)])
+        >>> assert tree[-1.1]         == set([Interval(-1.1, 1.1)])
+        >>> assert tree.search(1.1)   == set([Interval(-0.5, 1.5), Interval(0.5, 1.7)])   # Same as tree[1.1]
+        >>> assert tree[-0.5:0.5]     == set([Interval(-0.5, 1.5), Interval(-1.1, 1.1)])  # Interval overlap query
+        >>> assert tree.search(1.5, 1.5) == set()                                         # Same as tree[1.5:1.5]
+        >>> assert tree.search(1.5) == set([Interval(0.5, 1.7)])                          # Same as tree[1.5]
+
+        >>> assert tree.search(1.7, 1.8) == set()
 
     Envelop queries::
     
-        >>> assert itree.search(-0.5, 0.5, strict=True) == set([])
-        >>> assert itree.search(-0.4, 1.7, strict=True) == set([Interval(0.5, 1.7, None)])
+        >>> assert tree.search(-0.5, 0.5, strict=True) == set()
+        >>> assert tree.search(-0.4, 1.7, strict=True) == set([Interval(0.5, 1.7)])
         
     Membership queries::
-    
-        >>> Interval(-0.5, 0.5) in itree
+
+        >>> tree = IntervalTree([Interval(-1.1, 1.1), Interval(-0.5, 1.5), Interval(0.5, 1.7)])
+        >>> Interval(-0.5, 0.5) in tree
         False
-        >>> Interval(-1.1, 1.1) in itree
+        >>> Interval(-1.1, 1.1) in tree
         True
-        >>> Interval(-1.1, 1.1, "x") in itree
+        >>> Interval(-1.1, 1.1, "x") in tree
         False
-        >>> itree.overlaps(-1.1)
+        >>> tree.overlaps(-1.1)
         True
-        >>> not itree.overlaps(1.7) # TODO: itree.overlaps(1.7) returns None, should return False
-        True
-        >>> itree.overlaps(1.7, 1.8)
+        >>> tree.overlaps(1.7)
         False
-        >>> itree.overlaps(-1.2, -1.1)
+        >>> tree.overlaps(1.7, 1.8)
         False
-        >>> itree.overlaps(-1.2, -1.0)
+        >>> tree.overlaps(-1.2, -1.1)
+        False
+        >>> tree.overlaps(-1.2, -1.0)
         True
     
     Sizing::
-    
-        >>> len(itree)
+
+        >>> tree = IntervalTree([Interval(-1.1, 1.1), Interval(-0.5, 1.5), Interval(0.5, 1.7)])
+        >>> len(tree)
         3
-        >>> itree.is_empty()
+        >>> tree.is_empty()
         False
         >>> IntervalTree().is_empty()
         True
-        >>> not itree
+        >>> not tree
         False
         >>> not IntervalTree()
         True
-        >>> itree.begin()
+        >>> print(tree.begin())    # using print() because of floats in Python 2.6
         -1.1
-        >>> itree.end()
+        >>> print(tree.end())      # ditto
         1.7
         
     Iteration::
-        
-        >>> [int.begin for int in sorted(itree)]
-        [-1.1, -0.5, 0.5]
-        >>> assert itree.items() == set([Interval(-0.5, 1.5, None), Interval(-1.1, 1.1, None), Interval(0.5, 1.7, None)])
+
+        >>> tree = IntervalTree([Interval(-11, 11), Interval(-5, 15), Interval(5, 17)])
+        >>> [iv.begin for iv in sorted(tree)]
+        [-11, -5, 5]
+        >>> assert tree.items() == set([Interval(-5, 15), Interval(-11, 11), Interval(5, 17)])
 
     Copy- and typecasting, pickling::
     
-        >>> itree = IntervalTree([Interval(0,1,"x"), Interval(1,2,["x"])])
-        >>> itree2 = IntervalTree(itree) # Does not copy Interval objects
-        >>> itree3 = itree.copy()        # Shallow copy of Interval objects (which is the same as above as those are singletons).
+        >>> tree0 = IntervalTree([Interval(0, 1, "x"), Interval(1, 2, ["x"])])
+        >>> tree1 = IntervalTree(tree0)  # Shares Interval objects
+        >>> tree2 = tree0.copy()         # Shallow copy (same as above, as Intervals are singletons)
         >>> import pickle
-        >>> itree4 = pickle.loads(pickle.dumps(itree)) # Full copy
-        >>> list(itree[1])[0].data[0] = "y"
-        >>> list(itree)
-        [Interval(0, 1, 'x'), Interval(1, 2, ['y'])]
-        >>> list(itree2)
-        [Interval(0, 1, 'x'), Interval(1, 2, ['y'])]
-        >>> list(itree3)
-        [Interval(0, 1, 'x'), Interval(1, 2, ['y'])]
-        >>> list(itree4)
-        [Interval(0, 1, 'x'), Interval(1, 2, ['x'])]
+        >>> tree3 = pickle.loads(pickle.dumps(tree0))  # Deep copy
+        >>> list(tree0[1])[0].data[0] = "y"  # affects shallow copies, but not deep copies
+        >>> tree0
+        IntervalTree([Interval(0, 1, 'x'), Interval(1, 2, ['y'])])
+        >>> tree1
+        IntervalTree([Interval(0, 1, 'x'), Interval(1, 2, ['y'])])
+        >>> tree2
+        IntervalTree([Interval(0, 1, 'x'), Interval(1, 2, ['y'])])
+        >>> tree3
+        IntervalTree([Interval(0, 1, 'x'), Interval(1, 2, ['x'])])
         
     Equality testing::
     
-        >>> IntervalTree([Interval(0,1)]) == IntervalTree([Interval(0,1)])
+        >>> IntervalTree([Interval(0, 1)]) == IntervalTree([Interval(0, 1)])
         True
-        >>> IntervalTree([Interval(0,1)]) == IntervalTree([Interval(0,1,"x")])
+        >>> IntervalTree([Interval(0, 1)]) == IntervalTree([Interval(0, 1, "x")])
         False
-
     """
-    
+    @classmethod
+    def from_tuples(cls, tups):
+        """
+        Create a new IntervalTree from an iterable of 2- or 3-tuples,
+         where the tuple lists begin, end, and optionally data.
+        """
+        ivs = [Interval(*t) for t in tups]
+        return IntervalTree(ivs)
+
     def __init__(self, intervals=None):
         """
-        Set up a tree. If intervals is set, add all the intervals to 
-        the tree.
+        Set up a tree. If intervals is provided, add all the intervals 
+        to the tree.
         
         Completes in O(n*log n) time.
         """
-        intervals = intervals if intervals is not None else []
-        self.all_intervals = set(intervals)
+        intervals = set(intervals) if intervals is not None else set()
+        for iv in intervals:
+            if iv.is_null():
+                raise ValueError(
+                    "IntervalTree: Null Interval objects not allowed in IntervalTree:"
+                    " {0}".format(iv)
+                )
+        self.all_intervals = intervals
         self.top_node = Node.from_intervals(self.all_intervals)
-        self.boundary_table = {}
+        self.boundary_table = SortedDict()
         for iv in self.all_intervals:
             self._add_boundaries(iv)
-        #self.verify()
-    
+
     def copy(self):
+        """
+        Construct a new IntervalTree using shallow copies of the 
+        intervals in the source tree.
+        
+        Completes in O(n*log n) time.
+        :rtype: IntervalTree
+        """
         return IntervalTree(iv.copy() for iv in self)
     
     def _add_boundaries(self, interval):
@@ -254,19 +292,19 @@ class IntervalTree(object):
         """
         if interval in self: 
             return
-        
-        #self.verify()
-        
-        #if self.top_node:
-        #    assert(interval not in self.top_node.search_point(interval.begin, set()))
-        self.all_intervals.add(interval)
-        if self.top_node is None:
+
+        if interval.is_null():
+            raise ValueError(
+                "IntervalTree: Null Interval objects not allowed in IntervalTree:"
+                " {0}".format(interval)
+            )
+
+        if not self.top_node:
             self.top_node = Node.from_interval(interval)
         else:
             self.top_node = self.top_node.add(interval)
-        self._add_boundaries(interval)        
-        #assert(interval in self.top_node.search_point(interval.begin, set()))
-        #self.verify()
+        self.all_intervals.add(interval)
+        self._add_boundaries(interval)
     append = add
     
     def addi(self, begin, end, data=None):
@@ -276,8 +314,9 @@ class IntervalTree(object):
         Completes in O(log n) time.
         """
         return self.add(Interval(begin, end, data))
-        
-    def extend(self, intervals):
+    appendi = addi
+    
+    def update(self, intervals):
         """
         Given an iterable of intervals, add them to the tree.
         
@@ -286,7 +325,14 @@ class IntervalTree(object):
         """
         for iv in intervals:
             self.add(iv)
-    
+
+    def extend(self, intervals):
+        """
+        Deprecated: Replaced by update().
+        """
+        warn("IntervalTree.extend() has been deprecated. Consider using update() instead", DeprecationWarning)
+        self.update(intervals)
+
     def remove(self, interval):
         """
         Removes an interval from the tree, if present. If not, raises 
@@ -331,12 +377,79 @@ class IntervalTree(object):
         Completes in O(log n) time.
         """
         return self.discard(Interval(begin, end, data))
-    
+
+    def difference(self, other):
+        """
+        Returns a new tree, comprising all intervals in self but not
+        in other.
+        """
+        ivs = set()
+        for iv in self:
+            if iv not in other:
+                ivs.add(iv)
+        return IntervalTree(ivs)
+
+    def difference_update(self, other):
+        """
+        Removes all intervals in other from self.
+        """
+        for iv in other:
+            self.discard(iv)
+
+    def union(self, other):
+        """
+        Returns a new tree, comprising all intervals from self
+        and other.
+        """
+        return IntervalTree(set(self).union(other))
+
+    def intersection(self, other):
+        """
+        Returns a new tree of all intervals common to both self and
+        other.
+        """
+        ivs = set()
+        shorter, longer = sorted([self, other], key=len)
+        for iv in shorter:
+            if iv in longer:
+                ivs.add(iv)
+        return IntervalTree(ivs)
+
+    def intersection_update(self, other):
+        """
+        Removes intervals from self unless they also exist in other.
+        """
+        for iv in self:
+            if iv not in other:
+                self.remove(iv)
+
+    def symmetric_difference(self, other):
+        """
+        Return a tree with elements only in self or other but not
+        both.
+        """
+        if not isinstance(other, set): other = set(other)
+        me = set(self)
+        ivs = me - other + (other - me)
+        return IntervalTree(ivs)
+
+    def symmetric_difference_update(self, other):
+        """
+        Throws out all intervals except those only in self or other,
+        not both.
+        """
+        other = set(other)
+        for iv in self:
+            if iv in other:
+                self.remove(iv)
+                other.remove(iv)
+        self.update(other)
+
     def remove_overlap(self, begin, end=None):
         """
         Removes all intervals overlapping the given point or range.
         
-        Completes in O( (r+m) * log n ) time, where:
+        Completes in O((r+m)*log n) time, where:
           * n = size of the tree
           * m = number of matches
           * r = size of the search range (this is 1 for a point)
@@ -344,12 +457,12 @@ class IntervalTree(object):
         hitlist = self.search(begin, end)
         for iv in hitlist: 
             self.remove(iv)
-    
+
     def remove_envelop(self, begin, end):
         """
         Removes all intervals completely enveloped in the given range.
         
-        Completes in O( (r+m) * log n ) time, where:
+        Completes in O((r+m)*log n) time, where:
           * n = size of the tree
           * m = number of matches
           * r = size of the search range (this is 1 for a point)
@@ -357,29 +470,83 @@ class IntervalTree(object):
         hitlist = self.search(begin, end, strict=True)
         for iv in hitlist:
             self.remove(iv)
-        
+
+    def chop(self, begin, end, datafunc=None):
+        """
+        Like remove_envelop(), but trims back Intervals hanging into
+        the chopped area so that nothing overlaps.
+        """
+        insertions = set()
+        begin_hits = [iv for iv in self[begin] if iv.begin < begin]
+        end_hits = [iv for iv in self[end] if iv.end > end]
+
+        if datafunc:
+            for iv in begin_hits:
+                insertions.add(Interval(iv.begin, begin, datafunc(iv, True)))
+            for iv in end_hits:
+                insertions.add(Interval(end, iv.end, datafunc(iv, False)))
+        else:
+            for iv in begin_hits:
+                insertions.add(Interval(iv.begin, begin, iv.data))
+            for iv in end_hits:
+                insertions.add(Interval(end, iv.end, iv.data))
+
+        self.remove_envelop(begin, end)
+        self.difference_update(begin_hits)
+        self.difference_update(end_hits)
+        self.update(insertions)
+
+    def slice(self, point, datafunc=None):
+        """
+        Split Intervals that overlap point into two new Intervals. if
+        specified, uses datafunc(interval, islower=True/False) to
+        set the data field of the new Intervals.
+        :param point: where to slice
+        :param datafunc(interval, isupper): callable returning a new
+        value for the interval's data field
+        """
+        hitlist = set(iv for iv in self[point] if iv.begin < point)
+        insertions = set()
+        if datafunc:
+            for iv in hitlist:
+                insertions.add(Interval(iv.begin, point, datafunc(iv, True)))
+                insertions.add(Interval(point, iv.end, datafunc(iv, False)))
+        else:
+            for iv in hitlist:
+                insertions.add(Interval(iv.begin, point, iv.data))
+                insertions.add(Interval(point, iv.end, iv.data))
+        self.difference_update(hitlist)
+        self.update(insertions)
+
+    def clear(self):
+        """
+        Empties the tree.
+
+        Completes in O(1) tine.
+        """
+        self.__init__()
+
     def find_nested(self):
         """
         Returns a dictionary mapping parent intervals to sets of 
         intervals overlapped by and contained in the parent.
         
         Completes in O(n^2) time.
+        :rtype: dict of [Interval, set of Interval]
         """
         result = {}
         
-        def add_if_nested(parent, child):
+        def add_if_nested():
             if parent.contains_interval(child):
                 if parent not in result:
                     result[parent] = set()
                 result[parent].add(child)
                 
-        long_ivs = sorted(self.all_intervals, key=len, reverse=True)
-        for i in xrange(len(long_ivs)):
-            parent = long_ivs[i]
-            for k in xrange(i+1, len(long_ivs)):
-                add_if_nested(parent, long_ivs[k])
+        long_ivs = sorted(self.all_intervals, key=Interval.length, reverse=True)
+        for i, parent in enumerate(long_ivs):
+            for child in long_ivs[i + 1:]:
+                add_if_nested()
         return result
-        
     
     def overlaps(self, begin, end=None):
         """
@@ -388,6 +555,7 @@ class IntervalTree(object):
         
         Completes in O(r*log n) time, where r is the size of the
         search range.
+        :rtype: bool
         """
         if end is not None:
             return self.overlaps_range(begin, end)
@@ -401,10 +569,11 @@ class IntervalTree(object):
         Returns whether some interval in the tree overlaps p.
         
         Completes in O(log n) time.
+        :rtype: bool
         """
         if self.is_empty():
             return False
-        return self.top_node.contains_point(p)
+        return bool(self.top_node.contains_point(p))
     
     def overlaps_range(self, begin, end):
         """
@@ -413,56 +582,47 @@ class IntervalTree(object):
         
         Completes in O(r*log n) time, where r is the range length and n
         is the table size.
+        :rtype: bool
         """
         if self.is_empty():
             return False
         elif self.overlaps_point(begin):
             return True
-        # TODO: add support for open and closed intervals
         return any(
             self.overlaps_point(bound) 
             for bound in self.boundary_table 
             if begin <= bound < end
-            )
+        )
     
     def split_overlaps(self):
         """
         Finds all intervals with overlapping ranges and splits them
         along the range boundaries.
         
-        Completes in worst-case O(n^2*log n) time, average O(n*log n) time.
+        Completes in worst-case O(n^2*log n) time (many interval 
+        boundaries are inside many intervals), best-case O(n*log n)
+        time (small number of overlaps << n per interval).
         """
         if not self:
             return
         if len(self.boundary_table) == 2:
             return
-        temp = IntervalTree()
-        
-        bounds = sorted(self.boundary_table) # get bound locations
-        # if strict:
-        for i in xrange(len(bounds)-1):
-            lbound = bounds[i]
-            ubound = bounds[i+1]
+
+        bounds = sorted(self.boundary_table)  # get bound locations
+
+        new_ivs = set()
+        for lbound, ubound in zip(bounds[:-1], bounds[1:]):
             for iv in self[lbound]:
-                temp[lbound:ubound] = iv.data
-        # else:
-        #     subbounds = []
-        #     for i in xrange(len(bounds)-1):
-        #         bound = bounds[i]
-        #         if not self.overlaps_point(bound):
-        #             subbounds.append(bound)
-        #     lbound = self.begin()
-        
-            
-        self.all_intervals = temp.all_intervals
-        self.top_node = temp.top_node
-        # self.boundary_table unchanged
-        
+                new_ivs.add(Interval(lbound, ubound, iv.data))
+
+        self.__init__(new_ivs)
+
     def items(self):
         """
         Constructs and returns a set of all intervals in the tree. 
         
         Completes in O(n) time.
+        :rtype: set of Interval
         """
         return set(self.all_intervals)
     
@@ -471,9 +631,10 @@ class IntervalTree(object):
         Returns whether the tree is empty.
         
         Completes in O(1) time.
+        :rtype: bool
         """
-        return len(self) == 0
-    
+        return 0 == len(self)
+
     def search(self, begin, end=None, strict=False):
         """
         Returns a set of all intervals overlapping the given range. Or,
@@ -484,44 +645,58 @@ class IntervalTree(object):
           * n = size of the tree
           * m = number of matches
           * k = size of the search range (this is 1 for a point)
+        :rtype: set of Interval
         """
-        if self.top_node is None:   # Empty tree?
-            return set([])
+        root = self.top_node
+        if not root:
+            return set()
         if end is None:
-            if isinstance(begin, Number):
-                return self.top_node.search_point(begin, set())
-            else:
+            try:
                 iv = begin
                 return self.search(iv.begin, iv.end, strict=strict)
-        elif isinstance(end, Number):
-            result = self.top_node.search_point(begin, set())
-            
-            # TODO: add support for open and closed intervals
-            result = result.union(self.top_node.search_overlap(
-                bound 
-                for bound in self.boundary_table 
-                if begin < bound < end
-                ))
+            except:
+                return root.search_point(begin, set())
+        elif begin >= end:
+            return set()
+        else:
+            result = root.search_point(begin, set())
+
+            boundary_table = self.boundary_table
+            bound_begin = boundary_table.bisect_left(begin)
+            bound_end = boundary_table.bisect_left(end)  # exclude final end bound
+            result.update(root.search_overlap(
+                # slice notation is slightly slower
+                boundary_table.iloc[index] for index in xrange(bound_begin, bound_end)
+            ))
+
+            # TODO: improve strict search to use node info instead of less-efficient filtering
             if strict:
                 result = set(
-                    iv 
-                    for iv in result 
+                    iv for iv in result
                     if iv.begin >= begin and iv.end <= end
-                    )
+                )
             return result
-        else: # duck-typed interval
-            return self.search(begin.begin, begin.end, strict)
     
     def begin(self):
         """
-        Returns the begin attribute of the first interval in the tree.
+        Returns the lower bound of the first interval in the tree.
+        
+        Completes in O(n) time.
+        :rtype: Number
         """
+        if not self.boundary_table:
+            return 0
         return min(self.boundary_table)
     
     def end(self):
         """
-        Returns the end attribute of the last interval in the tree.
+        Returns the upper bound of the last interval in the tree.
+        
+        Completes in O(n) time.
+        :rtype: Number
         """
+        if not self.boundary_table:
+            return 0
         return max(self.boundary_table)
     
     def print_structure(self, tostring=False):
@@ -529,6 +704,7 @@ class IntervalTree(object):
         ## FOR DEBUGGING ONLY ##
         Pretty-prints the structure of the tree. 
         If tostring is true, prints nothing and returns a string.
+        :rtype: None or str
         """
         if self.top_node:
             return self.top_node.print_structure(tostring=tostring)
@@ -545,17 +721,35 @@ class IntervalTree(object):
         Checks the table to ensure that the invariants are held.
         """
         if self.all_intervals:
+            ## top_node.all_children() == self.all_intervals
             try:
                 assert self.top_node.all_children() == self.all_intervals
-            except Exception as e:
-                print('Error: the tree and the membership set are out' \
-                    ' of sync!')
+            except AssertionError as e:
+                print(
+                    'Error: the tree and the membership set are out of sync!'
+                )
                 tivs = set(self.top_node.all_children())
                 print('top_node.all_children() - all_intervals:')
                 pprint(tivs - self.all_intervals)
                 print('all_intervals - top_node.all_children():')
                 pprint(self.all_intervals - tivs)
                 raise e
+
+            ## All members are Intervals
+            for iv in self:
+                assert isinstance(iv, Interval), (
+                    "Error: Only Interval objects allowed in IntervalTree:"
+                    " {0}".format(iv)
+                )
+
+            ## No null intervals
+            for iv in self:
+                assert not iv.is_null(), (
+                    "Error: Null Interval objects not allowed in IntervalTree:"
+                    " {0}".format(iv)
+                )
+
+            ## Reconstruct boundary_table
             bound_check = {}
             for iv in self:
                 if iv.begin in bound_check:
@@ -566,21 +760,63 @@ class IntervalTree(object):
                     bound_check[iv.end] += 1
                 else:
                     bound_check[iv.end] = 1
+
+            ## Reconstructed boundary table (bound_check) ==? boundary_table
             assert set(self.boundary_table.keys()) == set(bound_check.keys()),\
                 'Error: boundary_table is out of sync with ' \
                 'the intervals in the tree!'
-            for key,val in self.boundary_table.items():   # For efficiency reasons it should be iteritems in Py2, but we don't care much for efficiency in debug methods anyway.
+
+            # For efficiency reasons this should be iteritems in Py2, but we
+            # don't care much for efficiency in debug methods anyway.
+            for key, val in self.boundary_table.items():
                 assert bound_check[key] == val, \
-                    'Error: boundary_table[{}] should be {},' \
-                    ' but is {}!'.format(
+                    'Error: boundary_table[{0}] should be {1},' \
+                    ' but is {2}!'.format(
                         key, bound_check[key], val)
+
+            ## Internal tree structure
             self.top_node.verify(set())
         else:
+            ## Verify empty tree
             assert not self.boundary_table, \
                 "Error: boundary table should be empty!"
             assert self.top_node is None, \
                 "Error: top_node isn't None!"
-    
+
+    def score(self, full_report=False):
+        """
+        Returns a number between 0 and 1, indicating how suboptimal the tree
+        is. The lower, the better. Roughly, this number represents the
+        fraction of flawed Intervals in the tree.
+        :rtype: float
+        """
+        if len(self) <= 2:
+            return 0.0
+
+        n = len(self)
+        m = self.top_node.count_nodes()
+
+        def s_center_score():
+            """
+            Returns a normalized score, indicating roughly how many times
+            intervals share s_center with other intervals. Output is full-scale
+            from 0 to 1.
+            :rtype: float
+            """
+            raw = n - m
+            maximum = n - 1
+            return raw / float(maximum)
+
+        report = {
+            "depth": self.top_node.depth_score(n, m),
+            "s_center": s_center_score(),
+        }
+        cumulative = max(report.values())
+        report["_cumulative"] = cumulative
+        if full_report:
+            return report
+        return cumulative
+
     def __getitem__(self, index):
         """
         Returns a set of all intervals overlapping the given index or 
@@ -590,32 +826,46 @@ class IntervalTree(object):
           * n = size of the tree
           * m = number of matches
           * k = size of the search range (this is 1 for a point)
+        :rtype: set of Interval
         """
-        if isinstance(index, slice):
-            return self.search(index.start, index.stop)
-        else:
+        try:
+            start, stop = index.start, index.stop
+            if start is None:
+                start = self.begin()
+                if stop is None:
+                    return set(self)
+            if stop is None:
+                stop = self.end()
+            return self.search(start, stop)
+        except AttributeError:
             return self.search(index)
     
     def __setitem__(self, index, value):
         """
-        Adds a new interval to the tree.
+        Adds a new interval to the tree. A shortcut for
+        add(Interval(index.start, index.stop, value)).
         
         If an identical Interval object with equal range and data 
         already exists, does nothing.
         
         Completes in O(log n) time.
         """
-        if not isinstance(index, slice):
-            raise IndexError
-        self.add(Interval(index.start, index.stop, value))
-    
+        self.addi(index.start, index.stop, value)
+
+    def __delitem__(self, point):
+        """
+        Delete all items overlapping point.
+        """
+        self.remove_overlap(point)
+
     def __contains__(self, item):
         """
         Returns whether item exists as an Interval in the tree.
-        This method only returns true for exact matches; for
+        This method only returns True for exact matches; for
         overlaps, see the overlaps() method.
         
         Completes in O(1) time.
+        :rtype: bool
         """
         # Removed point-checking code; it might trick the user into
         # thinking that this is O(1), which point-checking isn't.
@@ -629,6 +879,7 @@ class IntervalTree(object):
         Shortcut for (Interval(begin, end, data) in tree).
         
         Completes in O(1) time.
+        :rtype: bool
         """
         return Interval(begin, end, data) in self
     
@@ -637,6 +888,7 @@ class IntervalTree(object):
         Returns an iterator over all the intervals in the tree.
         
         Completes in O(1) time.
+        :rtype: collections.Iterable[Interval]
         """
         return self.all_intervals.__iter__()
     iter = __iter__
@@ -646,529 +898,38 @@ class IntervalTree(object):
         Returns how many intervals are in the tree.
         
         Completes in O(1) time.
+        :rtype: int
         """
         return len(self.all_intervals)
     
-    #__hash__ = object.__hash__  # Does not seem to work: {IntervalTree([Interval(0,1)]): 1}[IntervalTree([Interval(0,1)])]
-        
     def __eq__(self, other):
         """
-        Whether two interval trees are equal.
+        Whether two IntervalTrees are equal.
         
-        Completes in O(n) time worst-case, O(1) otherwise.
+        Completes in O(n) time if sizes are equal; O(1) time otherwise.
+        :rtype: bool
         """
         return (
             isinstance(other, IntervalTree) and 
             self.all_intervals == other.all_intervals
         )
-        
-   
+    
     def __repr__(self):
+        """
+        :rtype: str
+        """
         ivs = sorted(self)
         if not ivs:
             return "IntervalTree()"
         else:
-            ivs = ", ".join(map(repr, ivs))
-            return "IntervalTree([{}])".format(ivs)
-    
+            return "IntervalTree({0})".format(ivs)
+
     __str__ = __repr__
 
     def __reduce__(self):
         """
         For pickle-ing.
+        :rtype: tuple
         """
-        return (IntervalTree, (sorted(self.all_intervals),))
+        return IntervalTree, (sorted(self.all_intervals),)
 
-class Node:
-    def __init__(self, x_center=None, s_center=set(), left_node=None, right_node=None):
-        self.x_center = x_center
-        self.s_center = set(s_center)
-        self.left_node = left_node
-        self.right_node = right_node
-        
-        self.rotate()
-    
-    @classmethod
-    def from_interval(cls, interval):
-        if interval is None:
-            return None
-        center = interval.begin #+ (interval.end-interval.begin)/2;
-        #print(center)
-        return Node(center, [interval] )
-    
-    @classmethod
-    def from_intervals(cls, intervals):
-        if not intervals:
-            return None
-        node = Node()
-        node = node.init_from_sorted(sorted(intervals))
-        return node
-    
-    def init_from_sorted(self, intervals):
-        if not intervals:
-            return None
-        center_iv = intervals[len(intervals)//2]
-        self.x_center = center_iv.begin #+ (center_iv.end - center_iv.begin)/2
-        self.s_center = set()
-        s_left = []
-        s_right = []
-        # TODO: add support for open and closed intervals
-        for k in intervals:
-            if k.end <= self.x_center:
-                s_left.append(k)
-            elif k.begin > self.x_center:
-                s_right.append(k)
-            else:
-                self.s_center.add(k)
-        self.left_node = Node.from_intervals(s_left)
-        self.right_node = Node.from_intervals(s_right)
-        return self.rotate()
-    
-    
-    def center_hit(self, interval):
-        """Returns whether interval overlaps self.x_center."""
-        return interval.contains_point(self.x_center)
-    
-    def hit_branch(self, interval):
-        """
-        Assuming not center_hit(interval), return which branch 
-        (left=0, right=1) interval is in.
-        """
-        # TODO: add support for open and closed intervals
-        return 1 if interval.begin > self.x_center else 0
-    
-    def refresh_balance(self):
-        """Recalculate self.balance and self.depth based on child node values."""
-        left_depth = self.left_node.depth if self.left_node else 0
-        right_depth = self.right_node.depth if self.right_node else 0
-        self.depth = 1 + max(left_depth, right_depth)
-        self.balance = right_depth - left_depth
-
-    def compute_depth(self):
-        """Recursively computes true depth of the subtree. Should only be needed for debugging. 
-        Unless something is wrong, the depth field should reflect the correct depth of the subtree"""
-        left_depth = self.left_node.compute_depth() if self.left_node else 0
-        right_depth = self.right_node.compute_depth() if self.right_node else 0
-        return 1 + max(left_depth, right_depth)
-        
-    def rotate(self):
-        """
-        Does rotating, if necessary, to balance this node, and 
-        returns the new top node.
-        """
-        self.refresh_balance()
-        if abs(self.balance) < 2:
-            return self
-        # balance > 0  is the heavy side
-        my_heavy = self.balance>0
-        child_heavy = self[my_heavy].balance>0
-        if my_heavy == child_heavy or self[my_heavy].balance == 0: # Heavy sides same or heavy side balanced
-            return self.srotate()
-        else:
-            return self.drotate()
-    
-    def srotate(self):
-        """Single rotation. Assumes that balance is +-2."""
-        #     self        save
-        #   save 3  ->   1   self
-        #  1   2            2   3
-        #
-        #  self            save
-        # 3   save  ->  self  1
-        #    2   1     3   2
-        
-        #assert(self.balance != 0)
-        heavy = self.balance>0
-        light = not heavy
-        save = self[heavy]
-        #print("srotate: bal={},{}".format(self.balance, save.balance))
-        #self.print_structure()
-        self[heavy] = save[light]   # 2
-        #assert(save[light])
-        save[light] = self.rotate()  # Needed to ensure the 2 and 3 are balanced under new subnode
-        save.refresh_balance()
-        
-        # Some intervals may overlap both self.x_center and save.x_center
-        # Promote those to the new tip of the tree
-        for iv in set(save[light].s_center):
-            if save.center_hit(iv):
-                save[light].s_center.remove(iv)
-                save.s_center.add(iv)
-        return save
-    
-    def drotate(self):
-        #print("drotate:")
-        #self.print_structure()
-        self[self.balance>0] = self[self.balance>0].srotate()
-        self.refresh_balance()
-        
-        #print("First rotate:")
-        #self.print_structure()
-        result = self.srotate()
-        
-        #print("Finished drotate:")
-        #self.print_structure()
-        #result.verify()
-
-        return result
-    
-    def add(self, interval):
-        """
-        Returns self after adding the interval and balancing.
-        """
-        if self.center_hit(interval):
-            self.s_center.add(interval)
-            return self
-        else:
-            direction = self.hit_branch(interval)
-            if not self[direction]:
-                self[direction] = Node.from_interval(interval)
-                self.refresh_balance()
-                return self
-            else:
-                self[direction] = self[direction].add(interval)
-                return self.rotate()
-    
-    def remove(self, interval):
-        """
-        Returns self after removing the interval and balancing. 
-        
-        If interval is not present, raise ValueError.
-        """
-        # since this is a list, called methods can set this to [1],
-        # making it true
-        done = []     
-        return self.remove_interval_helper(interval, done, 
-                                           shouldRaiseError=True)
-
-    def discard(self, interval):
-        """
-        Returns self after removing interval and balancing.
-        
-        If interval is not present, do nothing.
-        """
-        done = []
-        return self.remove_interval_helper(interval, done, 
-                                           shouldRaiseError=False)
-    
-    def remove_interval_helper(self, interval, done, shouldRaiseError):
-        """
-        Returns self after removing interval and balancing. 
-        If interval doesn't exist, raise ValueError.
-        
-        This method may set done to [1] to tell all callers that 
-        rebalancing has completed.
-        
-        See Eternally Confuzzled's jsw_remove_r function (lines 1-32) 
-        in his AVL tree article for reference.
-        """
-        trace = interval.begin == 347 and interval.end == 353
-        #if trace: print('\nRemoving from {} interval {}'.format(
-        #   self.x_center, interval))
-        if self.center_hit(interval):
-            #if trace: print('Hit at {}'.format(self.x_center))
-            if not shouldRaiseError and interval not in self.s_center:
-                done.append(1)
-                #if trace: print('Doing nothing.')
-                return self
-            try:
-                # raises error if interval not present - this is 
-                # desired.
-                self.s_center.remove(interval) 
-            except:
-                self.print_structure()
-                raise KeyError(interval)
-            if self.s_center:     # keep this node
-                done.append(1)    # no rebalancing necessary
-                #if trace: print('Removed, no rebalancing.')
-                return self
-            
-            # If we reach here, no intervals are left in self.s_center.
-            # So, prune self.
-            return self.prune()
-        else: # interval not in s_center
-            direction = self.hit_branch(interval)
-            
-            if not self[direction]:
-                if shouldRaiseError:
-                    raise ValueError
-                done.append(1)
-                return self
-            
-            #if trace: 
-            #   print('Descending to {} branch'.format(
-            #       ['left', 'right'][direction]
-            #       ))
-            self[direction] = self[direction].remove_interval_helper(
-                interval, done, shouldRaiseError)
-            
-            # Clean up
-            if not done:
-                #if trace: 
-                #    print('Rotating {}'.format(self.x_center))
-                #    self.print_structure()
-                return self.rotate()
-            return self
-    
-    def search_overlap(self, point_list):
-        """
-        Returns all intervals that overlap the point_list.
-        """
-        result = set()
-        for j in point_list:
-            self.search_point(j, result)
-        return result
-    
-    def search_point(self, point, result):
-        """
-        Returns all intervals that contain point.
-        """
-        # TODO: add support for open and closed intervals
-        for k in self.s_center:
-            if k.begin <= point and point < k.end:
-                result.add(k)
-        if point < self.x_center and self[0]:
-            return self[0].search_point(point, result)
-        elif point > self.x_center and self[1]:
-            return self[1].search_point(point, result)
-        return result
-    
-    def prune(self):
-        """
-        On a subtree where the root node's s_center is empty,
-        return a new subtree with no empty s_centers.
-        """
-        if not self[0] or not self[1]:    # if I have an empty branch
-            direction = not self[0]       # graft the other branch here
-            #if trace:
-            #    print('Grafting {} branch'.format(
-            #       'right' if direction else 'left'))
-            
-            result = self[direction]
-            #if result: result.verify()
-            return result
-        else:
-            # Replace the root node with the greatest predecessor.
-            (heir, self[0]) = self[0].pop_greatest_child()
-            #if trace: 
-            #    print('Replacing {} with {}.'.format(
-            #        self.x_center, heir.x_center
-            #        ))
-            #    print('Removed greatest predecessor:')
-            #    self.print_structure()
-            
-            #if self[0]: self[0].verify()
-            #if self[1]: self[1].verify()
-            
-            # Set up the heir as the new root node
-            (heir[0], heir[1]) = (self[0], self[1])
-            #if trace: print('Setting up the heir:')
-            #if trace: heir.print_structure()
-            
-            # popping the predecessor may have unbalanced this node; 
-            # fix it
-            heir.refresh_balance()
-            heir = heir.rotate()
-            #heir.verify()
-            #if trace: print('Rotated the heir:')
-            #if trace: heir.print_structure()
-            return heir
-        
-    def pop_greatest_child(self):
-        """
-        Used when pruning a node with both a left and a right branch.
-        Returns (greatest_child, node), where:
-          * greatest_child is a new node to replace the removed node.
-          * node is the subtree after: 
-              - removing the greatest child
-              - balancing
-              - moving overlapping nodes into greatest_child
-        
-        See Eternally Confuzzled's jsw_remove_r function (lines 34-54)
-        in his AVL tree article for reference.
-        """
-        #print('Popping from {}'.format(self.x_center))
-        if self[1] is None:         # This node is the greatest child.
-            # To reduce the chances of an overlap with a parent, return
-            # a child node containing the smallest possible number of 
-            # intervals, as close as possible to the maximum bound. 
-            ivs = set(self.s_center)
-            # Create a new node with the largest x_center possible.
-            max_iv = max(self.s_center, key=attrgetter('end'))
-            max_iv_len = max_iv.end - max_iv.begin
-            child_x_center = max_iv.begin if (max_iv_len <= 1) \
-                else max_iv.end - 1
-            child = Node.from_intervals(
-                [iv for iv in ivs if iv.contains_point(child_x_center)]
-                )
-            child.x_center = child_x_center
-            self.s_center = ivs - child.s_center
-            
-            #print('Pop hit! Returning child   = {}'.format( 
-            #    child.print_structure(tostring=True)
-            #    ))
-            assert not child[0]
-            assert not child[1]
-            
-            if self.s_center:
-                #print('     and returning newnode = {}'.format( self ))
-                #self.verify()
-                return (child, self)
-            else:
-                #print('     and returning newnode = {}'.format( self[0] ))
-                #if self[0]: self[0].verify()
-                return (child, self[0]) # Rotate left child up
-                
-        else:
-            #print('Pop descent to {}'.format(self[1].x_center))
-            (greatest_child, self[1]) = self[1].pop_greatest_child()
-            self.refresh_balance()
-            new_self = self.rotate()
-            
-            # Move any overlaps into greatest_child
-            for iv in set(new_self.s_center):
-                if iv.contains_point(greatest_child.x_center):
-                    new_self.s_center.remove(iv)
-                    greatest_child.add(iv)
-                    
-            #print('Pop Returning child   = {}'.format( 
-            #    greatest_child.print_structure(tostring=True)
-            #    ))
-            if new_self.s_center:
-                #print('and returning newnode = {}'.format(
-                #    new_self.print_structure(tostring=True)
-                #    ))
-                #new_self.verify()
-                return (greatest_child, new_self)
-            else:
-                new_self = new_self.prune()
-                #print('and returning prune = {}'.format( 
-                #    new_self.print_structure(tostring=True)
-                #    ))
-                #if new_self: new_self.verify()
-                return (greatest_child, new_self)
-    
-    def contains_point(self, p):
-        """
-        Returns whether this node or a child overlaps p.
-        """
-        for iv in self.s_center:
-            if iv.contains_point(p):
-                return True
-        branch = self[p>self.x_center]
-        return branch and branch.contains_point(p)
-    
-    def all_children(self):
-        return self.all_children_helper(set())
-    
-    def all_children_helper(self, result):
-        result.update(self.s_center)
-        if self[0]:
-            self[0].all_children_helper(result)
-        if self[1]:
-            self[1].all_children_helper(result)
-        return result
-    
-    def verify(self, parents = set()):
-        """
-        ## DEBUG ONLY ##
-        Recursively ensures that the invariants of an interval subtree 
-        hold.
-        """
-        assert(isinstance(self.s_center, set))
-        
-        bal = self.balance
-        assert abs(bal) < 2, \
-            "Error: Rotation should have happened, but didn't! \n{}".format(
-                self.print_structure(tostring=True)
-                )
-        self.refresh_balance()
-        assert bal == self.balance, \
-            "Error: self.balance not set correctly! \n{}".format(
-                self.print_structure(tostring=True)
-                )
-        
-        assert self.s_center, \
-            "Error: s_center is empty! \n{}".format(
-                self.print_structure(tostring=True)
-                )
-        for iv in self.s_center:
-            assert hasattr(iv, 'begin')
-            assert hasattr(iv, 'end')
-            # TODO: add support for open and closed intervals
-            assert iv.begin < iv.end
-            assert iv.overlaps(self.x_center)
-            for parent in sorted(parents):
-                assert not iv.contains_point(parent), \
-                    "Error: Overlaps ancestor ({})! \n{}\n\n{}".format(
-                        parent, iv, self.print_structure(to_string=True)
-                        )
-        if self[0]:
-            assert self[0].x_center < self.x_center, \
-                "Error: Out-of-order left child! {}".format(self.x_center)
-            self[0].verify(parents.union([self.x_center]))
-        if self[1]:
-            assert self[1].x_center > self.x_center, \
-                "Error: Out-of-order right child! {}".format(self.x_center)
-            self[1].verify(parents.union([self.x_center]))
-            
-    
-    def __getitem__(self, index):
-        """
-        Returns the left child if input is equivalent to False, or 
-        the right side otherwise.
-        """ 
-        if index:
-            return self.right_node
-        else:
-            return self.left_node
-    
-    def __setitem__(self, key, value):
-        """Sets the left (0) or right (1) child."""
-        if key:
-            self.right_node = value
-        else:
-            self.left_node = value
-    
-    def __str__(self):
-        """
-        Shows info about this node.
-        
-        Since Nodes are internal data structures not revealed to the 
-        user, I'm not bothering to make this copy-paste-executable as a
-        constructor.
-        """
-        return "Node<{}, balance={}>".format(self.x_center, self.balance)
-        #fieldcount = 'c_count,has_l,has_r = <{}, {}, {}>'.format(
-        #    len(self.s_center), 
-        #    bool(self.left_node), 
-        #    bool(self.right_node)
-        #)
-        #fields = [self.x_center, self.balance, fieldcount]
-        #return "Node({}, b={}, {})".format(*fields)
-    
-    def print_structure(self, indent=0, tostring=False):
-        """
-        For debugging.
-        """
-        result = ''
-        CR = '\n'
-        sp = indent*'    '
-        
-        rlist = []
-        rlist.append(str(self) + CR)
-        rlist.append(sp + '||||:' + CR)
-        if self.s_center: 
-            for iv in sorted(self.s_center):
-                rlist.append(sp+' '+repr(iv) + CR)
-        if self.left_node:
-            rlist.append(sp + '<<<<:') # no CR
-            rlist.append(self.left_node.print_structure(indent+1, True))
-        if self.right_node:
-            rlist.append(sp + '>>>>:') # no CR
-            rlist.append(self.right_node.print_structure(indent+1, True))
-        result = ''.join(rlist)
-        if tostring:
-            return result
-        else:
-            print(result)

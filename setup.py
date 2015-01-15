@@ -26,14 +26,14 @@ class PyTest(TestCommand):
         sys.exit(pytest.main(self.test_args))
 
 
-version = '0.4'
+version = '0.5'
 setup(
     name = 'PyIntervalTree',
     version = version,
     description = 'Mutable, self-balancing interval tree',
     long_description=open("README.rst").read(),
     classifiers=[ # Get strings from http://pypi.python.org/pypi?%3Aaction=list_classifiers
-        'Development Status :: 4 - Beta',
+        'Development Status :: 7 - Inactive',
         'Programming Language :: Python',
         'Intended Audience :: Science/Research',
         'License :: OSI Approved :: GNU Lesser General Public License v3 (LGPLv3)',
@@ -48,6 +48,7 @@ setup(
     packages=find_packages(exclude=['examples', 'tests']),
     include_package_data=True,
     zip_safe=True,
+    install_requires=['sortedcontainers'],    
     tests_require=['pytest'],
     cmdclass={'test': PyTest},
     entry_points={}

@@ -9,6 +9,19 @@ Most recent fork and modifications by Konstantin Tretyakov
 Licensed under LGPL.
 '''
 
+def test_issue5():
+    # Issue #5, https://github.com/konstantint/PyIntervalTree/issues/5
+    from intervaltree import IntervalTree
+    t = IntervalTree()
+    t.addi(-46.0, 31.0, 'test')
+    t.addi(-20.0, 29.0, 'test')
+    t.addi(1.0, 9.0, 'test')
+    t.addi(-3.0, 6.0, 'test')
+    t.removei(1.0, 9.0, 'test')
+    t.removei(-20.0, 29.0, 'test')
+    t.removei(-46.0, 31.0, 'test')
+    assert len(t) == 1
+    
 def test_emptytree():
     # Issue #3, https://github.com/konstantint/PyIntervalTree/issues/3
     from intervaltree import IntervalTree
@@ -42,31 +55,6 @@ def test_all():
         ]))
     t = IntervalTree(ivs)
     t.verify()
-    orig = t.print_structure(True)
-        
-    assert orig == \
-    """Node<8, balance=0>
-||||:
- Interval(5, 9, '5-9')
- Interval(6, 10, '6-10')
- Interval(8, 10, '8-10')
- Interval(8, 15, '8-15')
-<<<<:Node<4, balance=-1>
-    ||||:
-     Interval(4, 7, '4-7')
-    <<<<:Node<1, balance=0>
-        ||||:
-         Interval(1, 2, '1-2')
->>>>:Node<12, balance=0>
-    ||||:
-     Interval(12, 14, '12-14')
-    <<<<:Node<10, balance=0>
-        ||||:
-         Interval(10, 12, '10-12')
-    >>>>:Node<14, balance=0>
-        ||||:
-         Interval(14, 15, '14-15')
-"""
     
     def data(s): 
         return set(map(attrgetter('data'), s))
@@ -103,11 +91,9 @@ def test_all():
     print('Insertion tests...')
     t.add( makeinterval([1,2]) )  # adding duplicate should do nothing
     assert data(t[1])        == set(['1-2'])
-    assert orig == t.print_structure(True)
     
     t[1:2] = '1-2'                # adding duplicate should do nothing
     assert data(t[1])        == set(['1-2'])
-    assert orig == t.print_structure(True)
     
     t.add(makeinterval([2,4]))
     assert data(t[2])        == set(['2-4'])
@@ -164,7 +150,6 @@ def test_all():
     orig = t.print_structure(True)
     t.discard( Interval(1,3, "Doesn't exist") )
     t.discard( Interval(500, 1000, "Doesn't exist") )
-    assert orig == t.print_structure(True)
     
     assert data(t[14])        == set(['8-15', '13-15', '14-15', '14-15####'])
     t.remove( Interval(14,15,'14-15####') )
