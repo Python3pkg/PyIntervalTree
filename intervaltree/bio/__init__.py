@@ -16,8 +16,8 @@ Copyright 2014, Konstantin Tretyakov
 Licensed under MIT [This particular file, PyIntervalTree in general is licensed under LGPL].
 '''
 try:
-    from urllib import urlopen
-    from StringIO import StringIO as BytesIO
+    from urllib.request import urlopen
+    from io import StringIO as BytesIO
 except ImportError: # Python 3?
     from urllib.request import urlopen
     from io import BytesIO
@@ -36,13 +36,13 @@ class UCSCTable(object):
     
     @staticmethod
     def KNOWN_GENE(line):
-        return dict(zip(UCSCTable.KNOWN_GENE_FIELDS, line.split(b'\t')))
+        return dict(list(zip(UCSCTable.KNOWN_GENE_FIELDS, line.split(b'\t'))))
     @staticmethod
     def REF_GENE(line):
-        return dict(zip(UCSCTable.REF_GENE_FIELDS, line.split(b'\t')))
+        return dict(list(zip(UCSCTable.REF_GENE_FIELDS, line.split(b'\t'))))
     @staticmethod
     def ENS_GENE(line):
-        return dict(zip(UCSCTable.ENS_GENE_FIELDS, line.split(b'\t')))
+        return dict(list(zip(UCSCTable.ENS_GENE_FIELDS, line.split(b'\t'))))
 
 
 def _fix(interval):
@@ -85,7 +85,7 @@ class GenomeIntervalTree(defaultdict):
         self[chrom].addi(begin, end, data)
         
     def __len__(self):
-        return sum([len(tree) for tree in self.values()])
+        return sum([len(tree) for tree in list(self.values())])
 
     @staticmethod
     def from_bed(fileobj, field_sep=b'\t'):

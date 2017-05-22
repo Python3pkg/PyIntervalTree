@@ -124,7 +124,7 @@ def test_all():
         assert iv in tlist
     
     tset = set(t)
-    assert tset == t.items()
+    assert tset == list(t.items())
     print('    passed')
     
     # Deletion tests

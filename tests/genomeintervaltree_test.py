@@ -7,7 +7,7 @@ Licensed under MIT license.
 '''
 import os
 try:
-    from urllib import urlretrieve
+    from urllib.request import urlretrieve
 except ImportError: # Python 3?
     from urllib.request import urlretrieve
 from intervaltree.bio import GenomeIntervalTree, UCSCTable
